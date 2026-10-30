@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import urllib.parse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -12,60 +11,91 @@ logging.basicConfig(
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-def extract_video_id(url):
-    try:
-        url = url.strip()
-        if "youtu.be/" in url:
-            return url.split("youtu.be/")[1].split("?")[0].split("&")[0].split("/")[0]
-        elif "watch?v=" in url:
-            parsed = urllib.parse.urlparse(url)
-            return urllib.parse.parse_qs(parsed.query).get("v", [None])[0]
-        elif "shorts/" in url:
-            return url.split("shorts/")[1].split("?")[0].split("&")[0]
-        elif "live/" in url:
-            return url.split("live/")[1].split("?")[0].split("&")[0]
-    except Exception:
-        pass
-    return None
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Namaste! Koi bhi YouTube link bhejiye, main aapko VLC ke liye direct stream links generate karke dunga."
+        "Namaste! Koi bhi YouTube link bhejiye, main direct VLC playable googlevideo stream link generate karke dunga."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     
     if not (url.startswith("http://") or url.startswith("https://")):
-        await update.message.reply_text("Kripya ek valid YouTube URL bhejiye.")
+        await update.message.reply_text("Kripya ek valid URL bhejiye.")
         return
 
-    video_id = extract_video_id(url)
-    if not video_id:
-        await update.message.reply_text("Video ID pehchan nahi paya. Kripya valid YouTube video link bhejiye.")
-        return
+    status_msg = await update.message.reply_text("VLC Direct Stream URL nikal raha hoon, kripya intezar karein...")
 
-    # Direct VLC playable streams (Cloud IP blocks se 100% free)
-    vlc_stream_1 = f"https://invidious.privacyredirect.com/latest_version?id={video_id}&itag=18"
-    vlc_stream_2 = f"https://inv.nadeko.net/latest_version?id={video_id}&itag=22"
-    vlc_audio = f"https://invidious.privacyredirect.com/latest_version?id={video_id}&itag=140"
+    cmd = [
+        "yt-dlp",
+        "--no-cache-dir",
+        "--extractor-args", "youtube:player_client=ios",
+        "-g",
+        "-f", "18/b/best",
+        url
+    ]
 
-    reply_text = (
-        f"✅ **VLC Direct Stream Links:**\n\n"
-        f"🎬 **Video Stream (Normal Quality - Itag 18):**\n"
-        f"`{vlc_stream_1}`\n\n"
-        f"🎬 **Video Stream (HD Quality - Itag 22):**\n"
-        f"`{vlc_stream_2}`\n\n"
-        f"🎵 **Audio Only Stream (Itag 140):**\n"
-        f"`{vlc_audio}`\n\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"▶️ **VLC mein chalane ka tareeqa:**\n"
-        f"1. Upar diye gaye stream link par tap karke copy karein.\n"
-        f"2. VLC app kholein -> **More** -> **New stream** par jayein.\n"
-        f"3. Link paste karke play dabayein, video turant bina rukawat chalegi!"
-    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=35)
+        raw_output = stdout.decode().strip()
 
-    await update.message.reply_text(reply_text, parse_mode="Markdown")
+        if raw_output.startswith("http"):
+            stream_link = raw_output.split('\n')[0]
+            reply_text = (
+                f"✅ **VLC Direct Stream URL:**\n\n"
+                f"`{stream_link}`\n\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"▶️ **Play karne ke liye:**\n"
+                f"1. Upar wale link par tap karke copy karein.\n"
+                f"2. VLC app mein **More** -> **New stream** par paste karein aur play dabayein."
+            )
+            await status_msg.edit_text(reply_text, parse_mode="Markdown")
+        else:
+            # Fallback agar iOS client fail ho
+            cmd_fallback = [
+                "yt-dlp",
+                "--no-cache-dir",
+                "--extractor-args", "youtube:player_client=android",
+                "-g",
+                "-f", "18/b/best",
+                url
+            ]
+            proc_fb = await asyncio.create_subprocess_exec(
+                *cmd_fallback,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            out_fb, _ = await asyncio.wait_for(proc_fb.communicate(), timeout=35)
+            fb_url = out_fb.decode().strip()
+            if fb_url.startswith("http"):
+                stream_link = fb_url.split('\n')[0]
+                reply_text = (
+                    f"✅ **VLC Direct Stream URL:**\n\n"
+                    f"`{stream_link}`\n\n"
+                    f"━━━━━━━━━━━━━━━\n"
+                    f"▶️ **Play karne ke liye:**\n"
+                    f"1. Upar wale link par tap karke copy karein.\n"
+                    f"2. VLC app mein **More** -> **New stream** par paste karein aur play dabayein."
+                )
+                await status_msg.edit_text(reply_text, parse_mode="Markdown")
+            else:
+                await status_msg.edit_text("Stream extract nahi ho saki. Kripya doosra link try karein.")
+
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+        except:
+            pass
+        await status_msg.edit_text("Request timeout ho gayi. Kripya dobara try karein.")
+    except Exception as e:
+        await status_msg.edit_text(f"Error: {str(e)}")
 
 def main():
     if not BOT_TOKEN:
