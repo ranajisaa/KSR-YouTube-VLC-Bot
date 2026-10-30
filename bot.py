@@ -24,29 +24,30 @@ def extract_video_id(url):
         return url.split("live/")[1].split("?")[0]
     return None
 
-def get_stream_from_invidious(video_id):
+def get_stream_from_piped(video_id):
+    # Piped API endpoints jo datacenter IP restrictions ko bypass karte hain
     instances = [
-        "https://inv.tux.pizza",
-        "https://invidious.nerdvpn.de",
-        "https://vid.puffyan.us",
-        "https://invidious.jing.rocks"
+        "https://pipedapi.kavin.rocks",
+        "https://api.piped.private.coffee",
+        "https://pipedapi.tokhmi.xyz"
     ]
     for inst in instances:
         try:
-            req_url = f"{inst}/api/v1/videos/{video_id}"
-            req = urllib.request.Request(req_url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
+            req_url = f"{inst}/streams/{video_id}"
+            req = urllib.request.Request(
+                req_url,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
                 data = json.loads(response.read().decode())
-                # FormatStreams check karein (combined video+audio)
-                formats = data.get("formatStreams", [])
-                if formats:
-                    # Best quality link pehle lein
-                    return formats[-1].get("url")
-                # Agar adaptiveFormats hain
-                adaptive = data.get("adaptiveFormats", [])
-                for f in adaptive:
-                    if "video" in f.get("type", ""):
-                        return f.get("url")
+                # Combined video streams check karein
+                streams = data.get("videoStreams", [])
+                for s in streams:
+                    if not s.get("videoOnly") and s.get("url"):
+                        return s.get("url")
+                # HLS stream link (VLC mein live aur video dono smoothly play hoti hain)
+                if data.get("hls"):
+                    return data.get("hls")
         except Exception:
             continue
     return None
@@ -65,40 +66,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text("Stream link nikal raha hoon, thoda intezar karein...")
 
-    video_id = extract_video_id(url)
     direct_url = None
 
-    # Step 1: Cloud-safe API bypass method
-    if video_id:
-        try:
-            loop = asyncio.get_event_loop()
-            direct_url = await loop.run_in_executor(None, get_stream_from_invidious, video_id)
-        except Exception as e:
-            logging.error(f"Invidious bypass error: {e}")
+    # Step 1: yt-dlp with android_vr (VR client par YouTube koi bot sign-in nahi maangta)
+    try:
+        cmd = [
+            "yt-dlp",
+            "--no-cache-dir",
+            "--extractor-args", "youtube:player_client=android_vr,mweb",
+            "-g",
+            "-f", "b/best",
+            url
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=35)
+        output = stdout.decode().strip()
+        if output.startswith("http"):
+            direct_url = output.split('\n')[0]
+    except Exception as e:
+        logging.error(f"yt-dlp VR error: {e}")
 
-    # Step 2: Fallback to yt-dlp agar API se link na mila ho
+    # Step 2: Fallback to Piped API agar yt-dlp block ho
     if not direct_url:
-        try:
-            cmd = [
-                "yt-dlp",
-                "--no-cache-dir",
-                "-g",
-                "-f", "b/best",
-                url
-            ]
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=35)
-            output = stdout.decode().strip()
-            if output.startswith("http"):
-                direct_url = output.split('\n')[0]
-        except Exception as e:
-            logging.error(f"yt-dlp fallback error: {e}")
+        video_id = extract_video_id(url)
+        if video_id:
+            try:
+                loop = asyncio.get_event_loop()
+                direct_url = await loop.run_in_executor(None, get_stream_from_piped, video_id)
+            except Exception as e:
+                logging.error(f"Piped fallback error: {e}")
 
+    # Result response
     if direct_url and direct_url.startswith("http"):
         reply_text = (
             f"**Stream Link:**\n`{direct_url}`\n\n"
@@ -110,8 +113,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(reply_text, parse_mode="Markdown")
     else:
         await status_msg.edit_text(
-            "Error aayi: YouTube ne is video par bot restrictions lagayi hui hain. Kripya koi doosra video try karein.",
-            parse_mode="Markdown"
+            "Video stream extract nahi ho saka. Kripya thodi der baad dobara koshish karein ya doosra link bhejein."
         )
 
 def main():
