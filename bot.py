@@ -26,10 +26,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("Stream link nikal raha hoon, thoda intezar karein...")
 
     try:
-        # iOS client bypasses JS challenges and datacenter bot blocks
         cmd = [
             "yt-dlp",
-            "--no-interactive",
             "--no-cache-dir",
             "--extractor-args", "youtube:player_client=ios,android",
             "-g",
