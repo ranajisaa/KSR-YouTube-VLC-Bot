@@ -26,14 +26,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("Stream link nikal raha hoon, thoda intezar karein...")
 
     try:
+        # web_embedded aur tv_embedded datacenter sign-in block ko bypass karte hain
         cmd = [
             "yt-dlp",
             "--no-cache-dir",
-            "--extractor-args", "youtube:player_client=ios,android",
+            "--extractor-args", "youtube:player_client=web_embedded,tv_embedded",
             "-g",
             "-f", "b/best",
             url
         ]
+
+        if os.path.exists("cookies.txt"):
+            cmd.extend(["--cookies", "cookies.txt"])
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
