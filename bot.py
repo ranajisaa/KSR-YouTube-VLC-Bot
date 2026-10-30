@@ -30,62 +30,60 @@ def extract_video_id(url):
         pass
     return None
 
-def fetch_stream_tunnel(url, video_id):
-    # 1. Cobalt Tunnel Nodes (Direct proxied media stream - NO IP Lock)
-    cobalt_nodes = [
-        "https://cobalt-api.kwiatekm.tokyo/",
-        "https://capi.wuk.sh/",
-        "https://cobalt.canine.tools/",
-        "https://dl.khub.win/",
-        "https://cobalt.shyim.net/",
-        "https://cobalt.slpy.one/"
+def fetch_working_vlc_link(video_id):
+    # Tested, active Invidious instances jo directly playable formatStreams deti hain
+    instances = [
+        "https://invidious.jing.rocks",
+        "https://inv.nadeko.net",
+        "https://invidious.nerdvpn.de",
+        "https://iv.melmac.space"
     ]
     
-    payload = json.dumps({"url": url}).encode('utf-8')
     headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     }
 
-    for node in cobalt_nodes:
+    for inst in instances:
         try:
-            req = urllib.request.Request(node, data=payload, headers=headers, method='POST')
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                if data.get("url"):
-                    return data["url"]
-                if data.get("picker") and len(data["picker"]) > 0:
-                    return data["picker"][0].get("url")
+            req_url = f"{inst}/api/v1/videos/{video_id}"
+            req = urllib.request.Request(req_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as res:
+                data = json.loads(res.read().decode())
+                
+                # FormatStreams me direct playable video+audio mp4 URLs hote hain
+                streams = data.get("formatStreams", [])
+                if streams:
+                    # Sabse best combined format URL return karein
+                    for st in reversed(streams):
+                        if st.get("url"):
+                            return st["url"]
+                
+                # Agar formats na mile to HLS stream check karein
+                if data.get("hlsContentUrl"):
+                    return data["hlsContentUrl"]
         except Exception as e:
-            logging.warning(f"Cobalt error on {node}: {e}")
+            logging.warning(f"Error on {inst}: {e}")
+            continue
 
-    # 2. Piped Proxy Backends (Fallback: Reverse-proxied video streams)
-    if video_id:
-        piped_nodes = [
+    # Secondary Gateway: Direct Piped Instance
+    try:
+        piped_req = urllib.request.Request(
             f"https://pipedapi.adminforge.de/streams/{video_id}",
-            f"https://api.piped.private.coffee/streams/{video_id}",
-            f"https://pipedapi.tokhmi.xyz/streams/{video_id}",
-            f"https://piped-api.lunar.icu/streams/{video_id}"
-        ]
-        for p_url in piped_nodes:
-            try:
-                p_req = urllib.request.Request(p_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(p_req, timeout=6) as p_resp:
-                    p_data = json.loads(p_resp.read().decode('utf-8'))
-                    for stream in p_data.get("videoStreams", []):
-                        if not stream.get("videoOnly") and stream.get("url"):
-                            return stream["url"]
-                    if p_data.get("hls"):
-                        return p_data["hls"]
-            except Exception as e:
-                logging.warning(f"Piped error on {p_url}: {e}")
+            headers=headers
+        )
+        with urllib.request.urlopen(piped_req, timeout=5) as p_res:
+            p_data = json.loads(p_res.read().decode())
+            for stream in p_data.get("videoStreams", []):
+                if not stream.get("videoOnly") and stream.get("url"):
+                    return stream["url"]
+    except Exception as e:
+        logging.warning(f"Piped error: {e}")
 
     return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Namaste! Koi bhi YouTube link bhejiye, main VLC ke liye direct playable stream URL generate karke dunga."
+        "Namaste! Koi bhi YouTube link bhejiye, main VLC ke liye direct playable stream URL generate kar dunga."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,25 +98,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Video ID pehchan nahi paya. Valid link bhejiye.")
         return
 
-    status_msg = await update.message.reply_text("VLC Playable Direct Stream URL generate ho raha hai, intezar karein...")
+    status_msg = await update.message.reply_text("VLC Playable Stream URL nikal raha hoon, kripya intezar karein...")
 
     loop = asyncio.get_event_loop()
-    stream_url = await loop.run_in_executor(None, fetch_stream_tunnel, url, video_id)
+    stream_url = await loop.run_in_executor(None, fetch_working_vlc_link, video_id)
 
-    if stream_url and stream_url.startswith("http"):
+    if stream_url:
         reply_text = (
-            f"🎬 **VLC Direct Playable Stream URL:**\n\n"
+            f"🎬 **VLC Playable Direct Stream URL:**\n\n"
             f"`{stream_url}`\n\n"
             f"━━━━━━━━━━━━━━━\n"
             f"▶️ **Play karne ka tarika:**\n"
-            f"1. Upar link par ek baar tap karke copy karein.\n"
+            f"1. Upar link par tap karke copy karein.\n"
             f"2. VLC app kholein -> **More** -> **New stream** par jayein.\n"
-            f"3. Paste karke play dabayein, video direct stream ho jayegi!"
+            f"3. Paste karke play dabayein, video direct buffer hokar chalegi!"
         )
         await status_msg.edit_text(reply_text, parse_mode="Markdown")
     else:
         await status_msg.edit_text(
-            "Stream link generate nahi ho saka. Kripya 1 minute baad dobara koshish karein."
+            "Stream extract nahi ho saki. Kripya 30 second baad dobara koshish karein."
         )
 
 def main():
