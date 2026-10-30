@@ -1,7 +1,6 @@
 import os
 import asyncio
 import logging
-import urllib.parse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -14,7 +13,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "KSR YouTube VLC Player Bot online hai! Link bhejiye direct VLC stream pane ke liye."
+        "KSR YouTube VLC Player Bot online hai! YouTube video link bhejiye."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,17 +23,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Kripya valid YouTube video link bhejiye.")
         return
 
-    status_msg = await update.message.reply_text("Server stream link extract kar raha hai...")
+    status_msg = await update.message.reply_text("Stream extract ho rahi hai...")
 
-    # yt-dlp with cookies on hosting server
+    # Cookies check karein
+    has_cookies = os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0
+
     cmd = [
         "yt-dlp",
         "--no-cache-dir",
-        "--cookies", "cookies.txt",
+        "--no-check-certificates",
         "-f", "best[ext=mp4]/18/best",
-        "-g",
-        url
+        "-g"
     ]
+
+    if has_cookies:
+        cmd.extend(["--cookies", "cookies.txt"])
+    else:
+        # Web hosting IP block bypass karne ke liye Android TV embedded client
+        cmd.extend(["--extractor-args", "youtube:player_client=android_embedded,tv"])
+
+    cmd.append(url)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -43,7 +51,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=35)
         output = stdout.decode().strip()
 
         if output.startswith("http"):
@@ -53,18 +61,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"`{stream_url}`\n\n"
                 f"━━━━━━━━━━━━━━━\n"
                 f"▶️ **Play karne ka tareeqa:**\n"
-                f"1. Upar wale link par tap karke copy karein.\n"
-                f"2. VLC app -> **More** -> **New stream** par paste karein.\n"
-                f"3. Play dabayein, video server stream se chalegi."
+                f"1. Upar link par tap karke copy karein.\n"
+                f"2. VLC app kholein -> **More** -> **New stream** par paste karein.\n"
+                f"3. Play dabayein."
             )
             await status_msg.edit_text(reply_text, parse_mode="Markdown")
         else:
-            logging.error(f"yt-dlp stderr: {stderr.decode()}")
-            await status_msg.edit_text("Error: Stream extract nahi ho saki. Cookies file refresh karke check karein.")
+            err_text = stderr.decode()
+            logging.error(f"yt-dlp error: {err_text}")
+            await status_msg.edit_text("Stream extract nahi ho saki. Hosting server par cookies setup karein ya dusra link check karein.")
 
     except asyncio.TimeoutError:
-        proc.kill()
-        await status_msg.edit_text("Server timeout ho gaya.")
+        try:
+            proc.kill()
+        except:
+            pass
+        await status_msg.edit_text("Server timeout ho gaya. 30 second baad dobara koshish karein.")
     except Exception as e:
         await status_msg.edit_text(f"Error: {str(e)}")
 
