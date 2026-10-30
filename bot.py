@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import urllib.parse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -11,98 +12,63 @@ logging.basicConfig(
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
+def extract_video_id(url):
+    try:
+        url = url.strip()
+        if "youtu.be/" in url:
+            return url.split("youtu.be/")[1].split("?")[0].split("&")[0].split("/")[0]
+        elif "watch?v=" in url:
+            parsed = urllib.parse.urlparse(url)
+            return urllib.parse.parse_qs(parsed.query).get("v", [None])[0]
+        elif "shorts/" in url:
+            return url.split("shorts/")[1].split("?")[0].split("&")[0]
+        elif "live/" in url:
+            return url.split("live/")[1].split("?")[0].split("&")[0]
+    except Exception:
+        pass
+    return None
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Namaste! Koi bhi YouTube link bhejiye, main VLC ke liye direct playable stream URL nikal kar dunga."
+        "Namaste! Koi bhi YouTube link bhejiye, main aapko direct VLC play streams generate karke dunga."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     
     if not (url.startswith("http://") or url.startswith("https://")):
-        await update.message.reply_text("Kripya ek valid YouTube link bhejiye.")
+        await update.message.reply_text("Kripya valid YouTube video link bhejiye.")
         return
 
-    status_msg = await update.message.reply_text("VLC Playable Stream URL nikal raha hoon, thoda intezar karein...")
+    video_id = extract_video_id(url)
+    if not video_id:
+        await update.message.reply_text("URL se Video ID nahi mila. Kripya valid YouTube link bhejein.")
+        return
 
-    # YouTube Studio Creator Client (Datacenter IP par bot-block bypass karta hai)
-    cmd = [
-        "yt-dlp",
-        "--no-cache-dir",
-        "--no-check-certificates",
-        "--extractor-args", "youtube:player_client=android_creator,web_creator",
-        "-f", "best[ext=mp4]/18/b/best",
-        "-g",
-        url
-    ]
+    # Ye direct media playback endpoints hain jo VLC player direct stream karta hai
+    stream_hq = f"https://yewtu.be/latest_version?id={video_id}&itag=22"
+    stream_sd = f"https://yewtu.be/latest_version?id={video_id}&itag=18"
+    stream_audio = f"https://yewtu.be/latest_version?id={video_id}&itag=140"
+    backup_stream = f"https://vid.puffyan.us/latest_version?id={video_id}&itag=18"
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=40)
-        output = stdout.decode().strip()
+    reply_text = (
+        f"🎬 **VLC Playable Stream URLs:**\n\n"
+        f"🔹 **HD Video Stream (720p - itag 22):**\n"
+        f"`{stream_hq}`\n\n"
+        f"🔹 **SD Video Stream (360p - itag 18):**\n"
+        f"`{stream_sd}`\n\n"
+        f"🔹 **Backup Stream:**\n"
+        f"`{backup_stream}`\n\n"
+        f"🎵 **Audio Only Stream:**\n"
+        f"`{stream_audio}`\n\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"▶️ **Play karne ka tarika:**\n"
+        f"1. Kisi bhi ek link par tap karke copy karein.\n"
+        f"2. VLC app kholein -> **More** -> **New stream** par jayein.\n"
+        f"3. Paste karke play dabayein, video bina ruki direct chalu ho jayegi."
+    )
 
-        if output.startswith("http"):
-            stream_url = output.split('\n')[0]
-            reply_text = (
-                f"🎬 **VLC Playable Stream URL:**\n\n"
-                f"`{stream_url}`\n\n"
-                f"━━━━━━━━━━━━━━━\n"
-                f"▶️ **Play karne ka tareeqa:**\n"
-                f"1. Upar diye gaye link par tap karke copy karein.\n"
-                f"2. VLC app kholein -> **More** -> **New stream** par jayein.\n"
-                f"3. Link paste karke play karein."
-            )
-            await status_msg.edit_text(reply_text, parse_mode="Markdown")
-        else:
-            err_msg = stderr.decode().strip()
-            logging.error(f"yt-dlp error: {err_msg}")
-            # Secondary fallback: TV Embedded Client
-            cmd_tv = [
-                "yt-dlp",
-                "--no-cache-dir",
-                "--extractor-args", "youtube:player_client=tv_embedded",
-                "-f", "18/b/best",
-                "-g",
-                url
-            ]
-            proc_tv = await asyncio.create_subprocess_exec(
-                *cmd_tv,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout_tv, _ = await asyncio.wait_for(proc_tv.communicate(), timeout=30)
-            output_tv = stdout_tv.decode().strip()
-
-            if output_tv.startswith("http"):
-                stream_url = output_tv.split('\n')[0]
-                reply_text = (
-                    f"🎬 **VLC Playable Stream URL:**\n\n"
-                    f"`{stream_url}`\n\n"
-                    f"━━━━━━━━━━━━━━━\n"
-                    f"▶️ **Play karne ka tareeqa:**\n"
-                    f"1. Upar link par tap karke copy karein.\n"
-                    f"2. VLC app kholein -> **More** -> **New stream** par jayein.\n"
-                    f"3. Paste karke play dabayein."
-                )
-                await status_msg.edit_text(reply_text, parse_mode="Markdown")
-            else:
-                await status_msg.edit_text("Stream link extract nahi ho saka. Kripya doosra link try karein.")
-
-    except asyncio.TimeoutError:
-        try:
-            process.kill()
-        except:
-            pass
-        await status_msg.edit_text("Server timeout ho gaya. Kripya 30 second baad dobara try karein.")
-    except Exception as e:
-        await status_msg.edit_text(f"Error: {str(e)}")
+    await update.message.reply_text(reply_text, parse_mode="Markdown")
 
 def main():
     if not BOT_TOKEN:
