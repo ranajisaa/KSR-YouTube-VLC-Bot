@@ -26,32 +26,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("Stream link nikal raha hoon, thoda intezar karein...")
 
     try:
-        # Android client bypasses most cloud bot-blocks
+        # iOS client bypasses JS challenges and datacenter bot blocks
         cmd = [
             "yt-dlp",
-            "--extractor-args", "youtube:player_client=android,web",
-            "--no-warnings",
+            "--no-interactive",
+            "--no-cache-dir",
+            "--extractor-args", "youtube:player_client=ios,android",
             "-g",
             "-f", "b/best",
             url
         ]
-        
-        # Agar cookies file maujood hai to include karein
-        if os.path.exists("cookies.txt"):
-            cmd.extend(["--cookies", "cookies.txt"])
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         
-        # 45 second ka timeout taaki stuck na ho
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=40)
         direct_url = stdout.decode().strip()
 
         if direct_url.startswith("http"):
-            # Multiple stream URLs aane par pehla/combined handle karein
             stream_link = direct_url.split('\n')[0]
             reply_text = (
                 f"**Stream Link:**\n`{stream_link}`\n\n"
@@ -63,12 +59,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await status_msg.edit_text(reply_text, parse_mode="Markdown")
         else:
             err = stderr.decode().strip()
-            # Agar koi error message ho to dikhayein
-            clean_err = err.split('\n')[-1] if err else "Stream link generate nahi ho paya."
+            err_line = [l for l in err.split('\n') if "ERROR" in l]
+            clean_err = err_line[-1] if err_line else (err.split('\n')[-1] if err else "Stream link generate nahi ho saka.")
             await status_msg.edit_text(f"Error aayi:\n`{clean_err}`", parse_mode="Markdown")
 
     except asyncio.TimeoutError:
-        await status_msg.edit_text("Request timed out! Server ne bohot samay lagaya.")
+        try:
+            process.kill()
+        except:
+            pass
+        await status_msg.edit_text("Request timed out! YouTube ne response dene mein zyada samay liya.")
     except Exception as e:
         await status_msg.edit_text(f"Kuch gadbad hui: {str(e)}")
 
