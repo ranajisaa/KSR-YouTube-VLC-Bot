@@ -1,13 +1,9 @@
 import os
-import socket
+import asyncio
 import logging
 import urllib.parse
 from telegram import Update
-from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-
-# Network socket ko hang hone se rokne ke liye strict 5-second timeout
-socket.setdefaulttimeout(5)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -16,71 +12,72 @@ logging.basicConfig(
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-def extract_video_id(url):
-    try:
-        url = url.strip()
-        if "youtu.be/" in url:
-            return url.split("youtu.be/")[1].split("?")[0].split("&")[0].split("/")[0]
-        elif "watch?v=" in url:
-            parsed = urllib.parse.urlparse(url)
-            return urllib.parse.parse_qs(parsed.query).get("v", [None])[0]
-        elif "shorts/" in url:
-            return url.split("shorts/")[1].split("?")[0].split("&")[0]
-        elif "live/" in url:
-            return url.split("live/")[1].split("?")[0].split("&")[0]
-    except Exception:
-        pass
-    return None
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Namaste! Koi bhi YouTube link bhejiye, main VLC ke liye direct playable MP4 stream links taiyar kar dunga."
+        "KSR YouTube VLC Player Bot online hai! Link bhejiye direct VLC stream pane ke liye."
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    raw_text = update.message.text.strip()
+    url = update.message.text.strip()
     
-    if not ("http://" in raw_text or "https://" in raw_text):
-        await update.message.reply_text("Kripya ek valid YouTube link bhejiye.")
+    if not (url.startswith("http://") or url.startswith("https://")):
+        await update.message.reply_text("Kripya valid YouTube video link bhejiye.")
         return
 
-    video_id = extract_video_id(raw_text)
-    if not video_id:
-        await update.message.reply_text("Video ID detect nahi hua. Normal YouTube link bhejein.")
-        return
+    status_msg = await update.message.reply_text("Server stream link extract kar raha hai...")
 
-    # Direct Tunneled Media Streams (local=true Google ka IP lock aur redirect dono bypass karta hai)
-    stream_sd = f"https://yewtu.be/latest_version?id={video_id}&itag=18&local=true"
-    stream_backup = f"https://invidious.nerdvpn.de/latest_version?id={video_id}&itag=18&local=true"
-    stream_audio = f"https://yewtu.be/latest_version?id={video_id}&itag=140&local=true"
+    # yt-dlp with cookies on hosting server
+    cmd = [
+        "yt-dlp",
+        "--no-cache-dir",
+        "--cookies", "cookies.txt",
+        "-f", "best[ext=mp4]/18/best",
+        "-g",
+        url
+    ]
 
-    reply_html = (
-        "🎬 <b>VLC Direct Stream Links:</b>\n\n"
-        "🔹 <b>Stream 1 (Direct Video MP4):</b>\n"
-        f"<code>{stream_sd}</code>\n\n"
-        "🔹 <b>Stream 2 (Backup Video MP4):</b>\n"
-        f"<code>{stream_backup}</code>\n\n"
-        "🎵 <b>Stream 3 (Audio Only):</b>\n"
-        f"<code>{stream_audio}</code>\n\n"
-        "━━━━━━━━━━━━━━━\n"
-        "▶️ <b>Play karne ka tarika:</b>\n"
-        "1. Upar <code>code box</code> wale link par <b>sirf ek baar tap karein</b> (pura link ek baar mein copy ho jayega).\n"
-        "2. VLC app kholein ➡️ <b>More</b> ➡️ <b>New stream</b> par paste karein.\n"
-        "3. Orange arrow dabayein, video seedha play hogi!"
-    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        output = stdout.decode().strip()
 
-    await update.message.reply_text(reply_html, parse_mode=ParseMode.HTML)
+        if output.startswith("http"):
+            stream_url = output.split('\n')[0]
+            reply_text = (
+                f"🎬 **VLC Playable Stream URL:**\n\n"
+                f"`{stream_url}`\n\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"▶️ **Play karne ka tareeqa:**\n"
+                f"1. Upar wale link par tap karke copy karein.\n"
+                f"2. VLC app -> **More** -> **New stream** par paste karein.\n"
+                f"3. Play dabayein, video server stream se chalegi."
+            )
+            await status_msg.edit_text(reply_text, parse_mode="Markdown")
+        else:
+            logging.error(f"yt-dlp stderr: {stderr.decode()}")
+            await status_msg.edit_text("Error: Stream extract nahi ho saki. Cookies file refresh karke check karein.")
+
+    except asyncio.TimeoutError:
+        proc.kill()
+        await status_msg.edit_text("Server timeout ho gaya.")
+    except Exception as e:
+        await status_msg.edit_text(f"Error: {str(e)}")
 
 def main():
     if not BOT_TOKEN:
-        print("TELEGRAM_BOT_TOKEN environment variable nahi mila!")
+        print("TELEGRAM_BOT_TOKEN nahi mila!")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
 
-    print("KSR Stream Bot running...")
+    print("KSR Bot running on FadeHost...")
     app.run_polling()
 
 if __name__ == "__main__":
