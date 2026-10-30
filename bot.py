@@ -3,7 +3,6 @@ import asyncio
 import logging
 import json
 import urllib.request
-import urllib.parse
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -14,89 +13,43 @@ logging.basicConfig(
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-def get_video_id(url):
-    if "youtu.be/" in url:
-        return url.split("youtu.be/")[1].split("?")[0]
-    elif "watch?v=" in url:
-        parsed = urllib.parse.urlparse(url)
-        return urllib.parse.parse_qs(parsed.query).get("v", [None])[0]
-    elif "live/" in url:
-        return url.split("live/")[1].split("?")[0]
-    return None
-
-def fetch_direct_stream(video_id):
-    # Official YouTube TV Client API (Datacenter friendly, bypasses bot check)
-    api_url = "https://www.youtube.com/youtubei/v1/player"
+def get_cobalt_stream(url):
+    # Public Cobalt instances jo YouTube cipher aur datacenter block bypass karte hain
+    instances = [
+        "https://cobalt-api.kwiatekm.tokyo",
+        "https://api.cobalt.tools",
+        "https://cobalt.api.sc",
+        "https://capi.wuk.sh"
+    ]
+    
     payload = {
-        "videoId": video_id,
-        "context": {
-            "client": {
-                "clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
-                "clientVersion": "2.0",
-                "hl": "en",
-                "gl": "US"
-            }
-        }
+        "url": url,
+        "videoQuality": "720",
+        "audioFormat": "mp3",
+        "downloadMode": "auto"
     }
     
     headers = {
+        "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/538.1 (KHTML, like Gecko) Version/5.0 TV Safari/538.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
 
-    try:
-        req = urllib.request.Request(api_url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            
-            # Check for direct formats
-            streaming_data = data.get("streamingData", {})
-            
-            # 1. Progressive streams (Video + Audio combined)
-            formats = streaming_data.get("formats", [])
-            for f in formats:
-                if f.get("url"):
-                    return f.get("url")
-            
-            # 2. HLS Manifest (Perfect for VLC stream)
-            if streaming_data.get("hlsManifestUrl"):
-                return streaming_data.get("hlsManifestUrl")
-                
-            # 3. Adaptive formats
-            adaptive = streaming_data.get("adaptiveFormats", [])
-            for f in adaptive:
-                if f.get("url") and "video" in f.get("mimeType", ""):
-                    return f.get("url")
-    except Exception as e:
-        logging.error(f"TV Client error: {e}")
-
-    # Fallback: Android client API
-    payload_android = {
-        "videoId": video_id,
-        "context": {
-            "client": {
-                "clientName": "ANDROID_TESTSUITE",
-                "clientVersion": "1.9",
-                "androidSdkVersion": 30,
-                "hl": "en",
-                "gl": "US"
-            }
-        }
-    }
-    try:
-        req = urllib.request.Request(api_url, data=json.dumps(payload_android).encode('utf-8'), headers=headers)
-        with urllib.request.urlopen(req, timeout=12) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            streaming_data = data.get("streamingData", {})
-            formats = streaming_data.get("formats", [])
-            for f in formats:
-                if f.get("url"):
-                    return f.get("url")
-            if streaming_data.get("hlsManifestUrl"):
-                return streaming_data.get("hlsManifestUrl")
-    except Exception as e:
-        logging.error(f"Android fallback error: {e}")
-
+    for inst in instances:
+        try:
+            req = urllib.request.Request(
+                inst,
+                data=json.dumps(payload).encode('utf-8'),
+                headers=headers
+            )
+            with urllib.request.urlopen(req, timeout=12) as response:
+                res = json.loads(response.read().decode('utf-8'))
+                if res.get("url"):
+                    return res.get("url")
+                if res.get("stream"):
+                    return res.get("stream")
+        except Exception:
+            continue
     return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,14 +66,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     status_msg = await update.message.reply_text("Stream link nikal raha hoon, thoda intezar karein...")
 
-    video_id = get_video_id(url)
-    if not video_id:
-        await status_msg.edit_text("URL se Video ID nahi mil paya. Kripya valid YouTube link bhejein.")
-        return
-
     loop = asyncio.get_event_loop()
-    direct_url = await loop.run_in_executor(None, fetch_direct_stream, video_id)
+    direct_url = None
 
+    # Step 1: Cobalt bypass (Works on Music videos & avoids datacenter block)
+    try:
+        direct_url = await loop.run_in_executor(None, get_cobalt_stream, url)
+    except Exception as e:
+        logging.error(f"Cobalt error: {e}")
+
+    # Step 2: yt-dlp fallback
+    if not direct_url:
+        try:
+            cmd = [
+                "yt-dlp",
+                "--no-cache-dir",
+                "-g",
+                "-f", "b/best",
+                url
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+            out = stdout.decode().strip()
+            if out.startswith("http"):
+                direct_url = out.split('\n')[0]
+        except Exception as e:
+            logging.error(f"yt-dlp fallback error: {e}")
+
+    # Final Result
     if direct_url and direct_url.startswith("http"):
         reply_text = (
             f"**Stream Link:**\n`{direct_url}`\n\n"
@@ -131,7 +109,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await status_msg.edit_text(reply_text, parse_mode="Markdown")
     else:
-        await status_msg.edit_text("YouTube ne is video ki direct stream allow nahi ki. Kripya koi doosra video try karein.")
+        await status_msg.edit_text(
+            "Video stream link generate nahi ho saka. Kripya doosra link try karein."
+        )
 
 def main():
     if not BOT_TOKEN:
