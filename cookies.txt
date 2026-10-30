@@ -1,0 +1,13 @@
+# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.youtube.com  TRUE  /  TRUE  1807452555  __Secure-BUCKET  CNIC
+.youtube.com  TRUE  /  TRUE  1827899519  PREF  tz=America.Los_Angeles&f7=100
+.youtube.com  TRUE  /  FALSE  1793348394  GOOGLE_ABUSE_EXEMPTION  ID=31e617ea1da24a53:TM=1793337591:C=>:IP=1.187.64.19-:S=iy8mrLyUVJEyI9VD-b-6nA
+.youtube.com  TRUE  /  TRUE  1793341274  GPS  1
+.youtube.com  TRUE  /  TRUE  1808891515  VISITOR_INFO1_LIVE  V3oNLhtujko
+.youtube.com  TRUE  /  TRUE  1808891515  VISITOR_PRIVACY_METADATA  CgJJThIEGgAgQw%3D%3D
+.youtube.com  TRUE  /  TRUE  1808889280  __Secure-YNID  CuwBCAUSngEBDB6PDE-dwiZRvE6vIAdjhEtTqYLSTizfAw2wop_xTs46n9yjd26OFg6X9-qcb1oNIe-gc-QW0_nnwG389_n-E9OQgiT2RzLJDIhXh1UM6RBH7aKGFvoHpiaOInHwhFZAUjulgpvUee9KQ1_gDZCR651XRgB-lA-LBNTyXIB4H_8kAQO3_nmoaSbddvW6zp4qflC_q123rmR9z8N_CSgFMkUBHFj1apIAxD8UIviHP5rN2jcK8a8XR_9uIqOTfJEY_PLnW4ccGUHc9ENneIfliBWHNKc4cIzjwT0hs5h9M4JzfSGSZQY
+.youtube.com  TRUE  /  TRUE  1808889280  __Secure-ROLLOUT_TOKEN  CMuenPfTh47uWRCR2InglbeXAxjOp5j7_eCXAw%3D%3D
+.youtube.com  TRUE  /  TRUE  0  YSC  XRytQoElvyE
