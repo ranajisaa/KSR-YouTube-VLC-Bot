@@ -29,16 +29,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         process = await asyncio.create_subprocess_exec(
             "yt-dlp",
             "--cookies", "cookies.txt",
+            "--remote-components", "ejs:github",
+            "--no-warnings",
             "-g",
-            "-f", "b",
+            "-f", "b/best",
             url,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await process.communicate()
+        direct_url = stdout.decode().strip()
 
-        if process.returncode == 0:
-            direct_url = stdout.decode().strip()
+        if direct_url.startswith("http"):
             reply_text = (
                 f"**Stream Link:**\n`{direct_url}`\n\n"
                 "**VLC mein chalane ke liye:**\n"
