@@ -12,11 +12,13 @@ from telegram.ext import (
 
 TOKEN = os.environ.get("BOT_TOKEN")
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🎬 KSR YouTube VLC Player\n\n"
         "YouTube link bhejo, main stream URL nikaalunga."
     )
+
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
@@ -30,15 +32,14 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Valid YouTube link bhejo.")
         return
 
-    url = match.group(0).rstrip(".,!?)]}")
+    url = match.group(0).rstrip(".,!?)])")
 
-    status = await update.message.reply_text("⏳ Stream URL nikaal raha hoon...")
+    status = await update.message.reply_text("⌛ Stream URL nikaal raha hoon...")
 
     try:
         process = await asyncio.create_subprocess_exec(
             "yt-dlp",
-            "--js-runtimes", "node",
-            "--remote-components", "ejs:github",
+            "--extractor-args", "youtube:player_client=android",
             "-g",
             "-f", "b",
             url,
@@ -70,19 +71,17 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text("⏳ Timeout! Dobara try karo.")
 
     except Exception as e:
-        await status.edit_text(f"❌ Error: {str(e)[:2000]}")
+        await status.edit_text(f"❌ Error: {e}")
 
 
 def main():
     if not TOKEN:
-        raise RuntimeError("BOT_TOKEN set nahi hai.")
+        print("BOT_TOKEN environment variable nahi mila!")
+        return
 
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link)
-    )
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
 
     print("KSR Stream Bot running...")
     app.run_polling()
